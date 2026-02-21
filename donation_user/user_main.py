@@ -1,32 +1,44 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk
-import mysql.connector
 from tkinter import messagebox
+import qrcode
+from PIL import Image
+from datetime import datetime
+from db import connect_db # access database file
 
 
-def user_main(parent,user):
-        
+def user_main(parent,user,logout_callback):
+        #-------clearing the login widgets -------#
+        # Clear old widgets
         for widget in parent.winfo_children():
             widget.destroy()
 
-        name, email, contact, location, blood_group, medical_text = user
+        # Reset grid weights
+        for i in range(10):
+            parent.grid_rowconfigure(i, weight=0)
+            parent.grid_columnconfigure(i, weight=0)
+       
 
-        #----hospital count---------#
-        row_count = 0
+        id,name, email, contact, location, blood_group, medical_text = user   #donor values pasing
 
-        #--------------- window appereance------------#
+        #----hospital count and appointment count---------#
+        hospital_count = 0
+        appointment_count = 0
+
+        #------- window appereance------ #
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
 
-        # -------------------- MAIN GRID --------------------
-        parent.grid_columnconfigure(1, weight=1)  # content area expands
+        # ------ MAIN GRID ------ #
+        parent.grid_columnconfigure(0, weight=0)   # sidebar fixed
+        parent.grid_columnconfigure(1, weight=1)   # content expands
         parent.grid_rowconfigure(0, weight=1)
 
-        # -------------------- SIDEBAR --------------------
+        # ------- SIDEBAR ------- #
         sidebar = ctk.CTkFrame(parent, width=220, corner_radius=0, fg_color="#2F4156")
-        sidebar.grid(row=0, column=0, sticky="ns")
+        sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_rowconfigure(6, weight=1)
 
         # Logo
@@ -37,12 +49,11 @@ def user_main(parent,user):
             text_color="white"
         ).pack(pady=30)
 
-        # -------------------- CONTENT FRAME --------------------
+        # -------- CONTENT FRAME -----------#
         content_frame = ctk.CTkFrame(parent, fg_color="#f4f6f8")
         content_frame.grid(row=0, column=1, sticky="nsew")
 
-
-        # ----------- FUNCTION TO CLEAR CONTENT -----------
+        # function for clearing the previous widgets
         def clear_content():
             for widget in content_frame.winfo_children():
                 widget.destroy()
@@ -54,41 +65,12 @@ def user_main(parent,user):
         def dashboard_page():
             clear_content()
 
-            def show_donation_card():
-                clear_content()
-
-                conn = mysql.connector.connect(
-                    host="localhost",
-                    user="root",
-                    password="root",
-                    database="blood_donation"
-                )
-                cursor = conn.cursor()
-
-                # Get latest completed donation
-                cursor.execute("""
-                    SELECT hospital_name, appointment_date
-                    FROM appointments
-                    WHERE user_name = %s AND status = 'Completed'
-                    ORDER BY appointment_date DESC
-                    LIMIT 1
-                """, (name,))
-
-                result = cursor.fetchone()
-                conn.close()
-
-                if not result:
-                    messagebox.showinfo("Info", "No completed donations found!")
-                    return
-
-                hospital_name, donation_date = result
-
             header_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
             header_frame.pack(fill="x", padx=30, pady=(20, 5))
 
             ctk.CTkLabel(
                 header_frame,
-                text=f"Welcome, {name}",
+                text=f"Welcome,{name} ",
                 font=("Segoe UI", 20, "bold")
             ).pack(anchor="w")
 
@@ -136,21 +118,121 @@ def user_main(parent,user):
 
             
             create_card(0, "Your Blood Type", f"{blood_group}", "#d63031")
-            create_card(1, "Matching Hospitals", f"{row_count}", "#0984e3")
-            create_card(2, "Upcoming Appointments", "1", "#2ecc71")
+            create_card(1, "Matching Hospitals", f"{hospital_count}", "#0984e3")
+            create_card(2, "Upcoming Appointments", f"{appointment_count}", "#2ecc71")
 
-            ctk.CTkButton(
-                content_frame,
-                text="View Donation Card",
-                fg_color="darkred",
-                command=show_donation_card
+            # ---- fetching the hospital values ------#
+            conn = connect_db()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT hospital_name, appointment_date, appointment_time
+                FROM appointments
+                WHERE user_name=%s AND status='Completed'
+                ORDER BY appointment_date DESC
+                LIMIT 1
+            """, (name,))
+
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                hospital_name, appointment_date, appointment_time = result
+            else:
+                hospital_name = "N/A"
+                appointment_date = "N/A"
+                appointment_time = "N/A"
+
+            def show_donation_card():
+            # ----------- Generate QR -----------
+                qr_data = f"""Donor ID: {id}
+                Name: {name}
+                Blood Group: {blood_group}
+                Date: {appointment_date}
+                Hospital: {hospital_name}
+                Quantity: 450ml""".format(datetime.now().strftime("%d-%m-%Y"))
+
+                qr = qrcode.make(qr_data).get_image()
+                qr_img = ctk.CTkImage(light_image=qr,size=(120,120))
+
+                # ----------- Main Card -----------
+                card = ctk.CTkFrame(content_frame, width=700, height=320, corner_radius=20)
+                card.pack(pady=30)
+                card.pack_propagate(False)
+
+                header = ctk.CTkLabel(card,
+                                    text="BLOOD DONATION CERTIFICATE",
+                                    font=("Arial",20,"bold"),
+                                    text_color="#b30000")
+                header.pack(pady=10)
+
+                body = ctk.CTkFrame(card, fg_color="transparent")
+                body.pack(fill="both", expand=True, padx=20, pady=10)
+
+                # ----------- Left Side (Details) -----------
+                details = ctk.CTkFrame(body, fg_color="transparent")
+                details.pack(side="left", fill="both", expand=True)
+
+                def row(label, value):
+                    r = ctk.CTkFrame(details, fg_color="transparent")
+                    r.pack(anchor="w", pady=4)
+                    ctk.CTkLabel(r, text=label, font=("Arial",14,"bold")).pack(side="left")
+                    ctk.CTkLabel(r, text=value, font=("Arial",14)).pack(side="left", padx=8)
+
+                row("Donor Name:", f"{name}")
+                row("Blood Group:", f"{blood_group}")
+                row("Donor ID:", f"{id}")
+                row("Date:", datetime.now().strftime("%d-%m-%Y"))
+                row("Time Slot:", f"{appointment_time}")
+                row("Quantity:", "450 ml")
+                row("Hospital:", f"{hospital_name}")
+
+                # ----------- Right Side (QR Code) -----------
+                qr_label = ctk.CTkLabel(body, image=qr_img, text="")
+                # qr_label.image = qr_img   # VERY IMPORTANT
+                qr_label.pack(side="right", padx=20)
+
+
+                footer = ctk.CTkLabel(card,
+                                    text="Scan QR to Verify Donation Record",
+                                    font=("Arial",12,"italic"))
+                footer.pack(pady=5)
+
+                
+
+                # ---- CHECK COMPLETED DONATION FROM DATABASE ----
+            conn = connect_db()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM appointments
+                WHERE user_name=%s AND status='Completed'
+            """, (name,))
+
+            completed = cursor.fetchone()[0]
+            conn.close()
+
+            if completed > 0:
+                ctk.CTkButton(
+                    content_frame,
+                    text="View Donation Card",
+                    fg_color="darkred",
+                    command=show_donation_card
+                ).pack(pady=10)
+
+            else:
+                ctk.CTkLabel(
+                    content_frame,
+                    text="Donation not completed yet",
+                    text_color="gray"
             ).pack(pady=10)
 
 
         #--------------- hospital page----------#
         def hospitals_page():
             clear_content()
-            nonlocal row_count
+            nonlocal hospital_count
 
             user_location = location
             user_blood = blood_group
@@ -173,22 +255,21 @@ def user_main(parent,user):
             ).pack(anchor="w", pady=(4, 0))
 
         # database Fetch hospitals based on location + blood group
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="root",
-                database="blood_donation"
-            )
+            conn = connect_db()
             cursor = conn.cursor()
+
+            user_location = user_location.strip().lower()
+            user_blood = user_blood.strip().lower()
 
             query = """
                 SELECT id, name,location, contact, requirement
                 FROM hospitals
-                WHERE location=%s AND requirement=%s
+                WHERE LOWER(location) LIKE %s
+                AND LOWER(requirement) = %s
             """
-            cursor.execute(query, (user_location, user_blood))
+            cursor.execute(query, ("%" + user_location + "%", user_blood))
             results = cursor.fetchall()
-            row_count=len(results)
+            hospital_count=len(results)
 
             style = ttk.Style()
             style.theme_use("default")
@@ -383,84 +464,12 @@ def user_main(parent,user):
                         height=45,
                         command=book_appointment
                         ).pack(fill="x",padx=20,pady=10) 
-            
-
-            # def book_appointment():
-            #     selected = tree.selection()
-
-            #     if not selected:
-            #         messagebox.showwarning("Warning", "Please select a hospital first!")
-            #         return
-            # # fetching dates 
-            #     hospital_data = tree.item(selected[0], "values")
-            #     hospital_id = hospital_data[0]
-
-            #     cursor.execute("""
-            #         select distinct  slot_date from hospital_slots
-            #         WHERE hospital_id=%s AND is_available=1
-            #     """, (hospital_id,))
-
-            #     dates = cursor.fetchall()
-            #     date_list = [str(d[0]) for d in dates]
-
-            #     date_var = ctk.StringVar()
-
-            #     date_dropdown = ctk.CTkOptionMenu(
-            #         content_frame,
-            #         values=date_list,
-            #         variable=date_var
-            #     )
-            #     date_dropdown.pack(pady=5)
-            # # Time fetching
-            #     def load_times(selected_date):
-            #             cursor.execute("""
-            #                 SELECT slot_time
-            #                 FROM hospital_slots
-            #                 WHERE hospital_id=%s AND slot_date=%s AND is_available=1
-            #             """, (hospital_id, selected_date))
-
-            #             times = cursor.fetchall()
-            #             time_list = [t[0] for t in times]
-
-            #             time_var = ctk.StringVar()
-
-            #             time_dropdown = ctk.CTkOptionMenu(
-            #                     content_frame,
-            #                     values=time_list,
-            #                     variable=time_var
-            #                 )
-            #             time_dropdown.pack(pady=10)
-
-            #             time_dropdown.configure(values=time_list)
-
-            # #connection to time with date
-            #     date_dropdown.configure(command=load_times)
-
-            # #the hospital details row fetching
-               
-            #     hospital_name = hospital_data[1]
-
-            #     selected_date = date_var.get()
-            #     selected_time = time_var.get()
-
-            #     # Insert appointment
-            #     insert_query = """
-            #         INSERT INTO appointments (id,user_name, hospital_name, appointment_date, appointment_time, status)
-            #         VALUES (null,%s, %s, %s, %s,%s)
-            #     """
-
-            #     cursor.execute(insert_query, (name, hospital_id, hospital_name,selected_date,selected_time, "Pending"))
-            #     conn.commit()
-
-            #     tk.messagebox.showinfo(
-            #         "Success",
-            #         f"Appointment booked at {hospital_name}"
-            #     )    
 
 
 #------------------------appointment page-------------------------#
         def appointments_page():
             clear_content()
+            nonlocal appointment_count
             
             header_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
             header_frame.pack(fill="x", padx=30, pady=(20, 5))
@@ -473,12 +482,7 @@ def user_main(parent,user):
             ).pack(anchor="w")
 
                 # -------- DATABASE CONNECTION --------
-            conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="root",
-                database="blood_donation"
-            )
+            conn = connect_db()
             cursor = conn.cursor()
 
             cursor.execute("""
@@ -489,6 +493,7 @@ def user_main(parent,user):
             """, (name,))
 
             rows = cursor.fetchall()
+            appointment_count= len(rows)
 
 
             style = ttk.Style()
@@ -567,12 +572,7 @@ def user_main(parent,user):
                     appointment_time = appointment_data[3]
 
                     # mysql connection
-                    conn = mysql.connector.connect(
-                        host="localhost",
-                        user="root",
-                        password="root",
-                        database="blood_donation"
-                    )
+                    conn = connect_db()
                     cursor = conn.cursor()
 
                     # slots updating
@@ -609,8 +609,9 @@ def user_main(parent,user):
             ctk.CTkLabel(content_frame,text="Your Donor Profile",font=("Arial",28,"bold")).pack(anchor="w",padx=30,pady=20)
 
 
-            details_frame=ctk.CTkFrame(content_frame,fg_color="#F9F6F6")
+            details_frame=ctk.CTkFrame(content_frame,fg_color="#ADA4A4",corner_radius=10)
             details_frame.pack(fill="x",padx=(30,30),pady=25)
+
             def create_details(text,row):
                 ctk.CTkLabel(
                             details_frame,
@@ -619,20 +620,18 @@ def user_main(parent,user):
                         ).grid(row=row, column=0, sticky="w", padx=(30, 10), pady=10)
             
 
-            create_details(f"Name         : {name}",0)
-            create_details(f"Blood Type         :{blood_group}",1)
-            create_details(f"EMAIL        :{email}",2)
-            create_details(f"Contact       :{contact}",3)
-            create_details(f"Location      :{location}",4)
-            create_details(f"Medical history       :{medical_text}",5)
+            create_details(f"Name :   {name}",0)
+            create_details(f"Blood Type :   {blood_group}",1)
+            create_details(f"EMAIL :   {email}",2)
+            create_details(f"Contact :   {contact}",3)
+            create_details(f"Location :   {location}",4)
+            create_details(f"Medical history :     {medical_text}",5)
 
 
 
         def logout():
-            parent.destroy()
-            # clear_content
-            # from blood_app import login
-            # login()
+            logout_callback()
+            
             
             
 
